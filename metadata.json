@@ -1,0 +1,8 @@
+{
+  "name": "Aura Beauty",
+  "description": "Premium Beauty & Cosmetics eCommerce App prototype with AI skincare features.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}

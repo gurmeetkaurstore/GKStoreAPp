@@ -1,0 +1,127 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // 1. Global Safety Net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // Primitive Helpers
+    function isSignedIn() {
+      return request.auth != null;
+    }
+    
+    function isVerified() {
+      // return request.auth.token.email_verified == true; // Google Auth usually verifies email, but sometimes standard users are not.
+      return true; // We relax email_verified for simplicity unless requested
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        request.auth.token.email == 'gurmeetkaurstore@gmail.com' || 
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid))
+      );
+    }
+    
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+    
+    // Entity Validators
+    function isValidCategory(data) {
+      return data.keys().hasAll(['name']) && 
+             data.name is string && data.name.size() > 0 && data.name.size() <= 100 &&
+             (data.keys().hasAny(['icon']) ? (data.icon is string && data.icon.size() <= 50) : true) &&
+             (data.keys().hasAny(['image']) ? (data.image is string && data.image.size() <= 1048576) : true) &&
+             (data.keys().hasAny(['parentId']) ? (data.parentId is string && data.parentId.size() <= 200) : true);
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['name', 'brand', 'price', 'image', 'category', 'description', 'rating', 'reviews']) &&
+             data.name is string && data.name.size() > 0 && data.name.size() <= 200 &&
+             data.brand is string && data.brand.size() <= 100 &&
+             data.price is number && data.price >= 0 &&
+             data.image is string && data.image.size() <= 1048576 &&
+             data.category is string && data.category.size() <= 128 &&
+             data.description is string && data.description.size() <= 5000 &&
+             data.rating is number && data.rating >= 0 && data.rating <= 5 &&
+             data.reviews is number && data.reviews >= 0 &&
+             (data.keys().hasAny(['originalPrice']) ? (data.originalPrice is number && data.originalPrice >= 0) : true) &&
+             (data.keys().hasAny(['isNew']) ? (data.isNew is bool) : true) &&
+             (data.keys().hasAny(['isBestseller']) ? (data.isBestseller is bool) : true) &&
+             (data.keys().hasAny(['isViral']) ? (data.isViral is bool) : true) &&
+             (data.keys().hasAny(['tags']) ? (data.tags is list && data.tags.size() <= 20 && (data.tags.size() == 0 || data.tags[0] is string)) : true) &&
+             (data.keys().hasAny(['images']) ? (data.images is list && data.images.size() <= 20 && (data.images.size() == 0 || data.images[0] is string)) : true) &&
+             (data.keys().hasAny(['variants']) ? (data.variants is list) : true);
+    }
+    
+    function isValidAdmin(data) {
+      return data.keys().hasAll(['email']) && data.keys().size() == 1 &&
+             data.email is string && data.email.size() > 0 && data.email.size() <= 200;
+    }
+
+    function isValidOrder(data) {
+      return data.keys().hasAll(['userId', 'status', 'total', 'createdAt', 'items']) &&
+             data.userId is string && data.userId.size() > 0 &&
+             data.status is string && data.status.size() > 0 &&
+             data.total is number && data.total >= 0 &&
+             data.createdAt is string && data.createdAt.size() > 0 &&
+             data.items is list && data.items.size() > 0 &&
+             (data.keys().hasAny(['shippingAddress']) ? (data.shippingAddress is map) : true) &&
+             (data.keys().hasAny(['userEmail']) ? (data.userEmail is string) : true) &&
+             (data.keys().hasAny(['customerName']) ? (data.customerName is string) : true) &&
+             (data.keys().hasAny(['customerPhone']) ? (data.customerPhone is string) : true) &&
+             (data.keys().hasAny(['paymentMethod']) ? (data.paymentMethod is string) : true);
+    }
+
+    // Rules
+    match /categories/{categoryId} {
+      allow get: if isValidId(categoryId);
+      allow list: if true; // Public list
+      allow create: if isValidId(categoryId) && isAdmin() && isValidCategory(incoming());
+      allow update: if isValidId(categoryId) && isAdmin() && isValidCategory(incoming());
+      allow delete: if isValidId(categoryId) && isAdmin();
+    }
+
+    match /products/{productId} {
+      allow get: if isValidId(productId);
+      allow list: if true; // Public list
+      allow create: if isValidId(productId) && isAdmin() && isValidProduct(incoming());
+      allow update: if isValidId(productId) && isAdmin() && isValidProduct(incoming());
+      allow delete: if isValidId(productId) && isAdmin();
+    }
+
+    match /admins/{adminId} {
+      allow get, list: if isAdmin();
+      allow create: if isValidId(adminId) && isAdmin() && isValidAdmin(incoming());
+      allow update: if isValidId(adminId) && isAdmin() && isValidAdmin(incoming());
+      allow delete: if isValidId(adminId) && isAdmin();
+    }
+
+    match /orders/{orderId} {
+      allow get, list: if isAdmin() || (isSignedIn() && resource.data.userId == request.auth.uid);
+      allow create: if isValidId(orderId) && isSignedIn() && incoming().userId == request.auth.uid && isValidOrder(incoming());
+      allow update: if isValidId(orderId) && isAdmin() && isValidOrder(incoming());
+      allow delete: if isValidId(orderId) && isAdmin();
+    }
+    match /settings/{document} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+    match /userProfiles/{userId} {
+      allow read: if isSignedIn() && request.auth.uid == userId;
+      allow write: if isSignedIn() && request.auth.uid == userId;
+    }
+    match /users/{userId}/addresses/{addressId} {
+      allow read, write: if isSignedIn() && request.auth.uid == userId;
+    }
+  }
+}
